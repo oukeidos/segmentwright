@@ -1,0 +1,43 @@
+[project]
+name = "segmentwright"
+version = "0.1.0"
+description = "Generate locally aligned subtitles from speech media."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "google-genai>=1.0.0",
+    "huggingface-hub>=0.23.0",
+    "torch",
+    "torchaudio",
+    "torchcodec",
+    "nemo_toolkit[asr]",
+    "fireredvad",
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.8.0",
+]
+
+[project.scripts]
+segmentwright = "segmentwright.cli:main"
+
+[build-system]
+requires = ["setuptools>=69.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

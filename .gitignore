@@ -1,0 +1,15 @@
+.venv/
+.uv-cache/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.py[cod]
+artifacts/
+docs/
+internal/
+outputs/
+runs/
+*.srt
+*.vtt
+*.egg-info/
+.env
