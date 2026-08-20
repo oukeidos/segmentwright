@@ -216,7 +216,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--coverage-gap-merge-sec", type=float, default=2.0)
     parser.add_argument("--max-retries", type=int, default=1)
     parser.add_argument("--max-split-depth", type=int, default=2)
-    parser.add_argument("--max-work-items", type=int, default=16)
+    parser.add_argument(
+        "--max-retry-work-items",
+        type=int,
+        default=None,
+        help="Limit additional retry children only. Default: unlimited.",
+    )
 
     parser.add_argument("--cache-dir", type=Path)
     parser.add_argument("--no-cache", action="store_true")
@@ -276,7 +281,7 @@ def build_config(args: argparse.Namespace) -> AppConfig:
         coverage_gap_merge_sec=args.coverage_gap_merge_sec,
         max_retries=args.max_retries,
         max_split_depth=args.max_split_depth,
-        max_work_items=args.max_work_items,
+        max_retry_work_items=args.max_retry_work_items,
         cache_dir=expand_path(args.cache_dir) if args.cache_dir else None,
         cache_enabled=not args.no_cache,
         force_gemini=args.force_gemini,

@@ -121,7 +121,7 @@ class AppConfig:
     coverage_gap_merge_sec: float = 2.0
     max_retries: int = 1
     max_split_depth: int = 2
-    max_work_items: int = 16
+    max_retry_work_items: int | None = None
     cache_dir: Path | None = None
     cache_enabled: bool = True
     force_gemini: bool = False
@@ -272,8 +272,8 @@ def validate_config(config: AppConfig) -> None:
         raise ValueError("--max-retries must be >= 0")
     if config.max_split_depth < 0:
         raise ValueError("--max-split-depth must be >= 0")
-    if config.max_work_items <= 0:
-        raise ValueError("--max-work-items must be greater than 0")
+    if config.max_retry_work_items is not None and config.max_retry_work_items <= 0:
+        raise ValueError("--max-retry-work-items must be greater than 0")
 
     if config.output_path.exists() and not config.overwrite:
         raise ValueError(

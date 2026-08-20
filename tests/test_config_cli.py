@@ -34,7 +34,44 @@ def test_cli_defaults(tmp_path: Path) -> None:
     assert config.firered_vad_auto_download is True
     assert config.target_chunk_sec == 180
     assert config.max_chunk_sec == 180
+    assert config.max_retry_work_items is None
     assert config.cache_enabled is True
+
+
+def test_cli_accepts_explicit_retry_budget(tmp_path: Path) -> None:
+    input_path = tmp_path / "input.mp4"
+    input_path.write_bytes(b"placeholder")
+    output_path = tmp_path / "output.srt"
+
+    args = build_parser().parse_args(
+        [str(input_path), str(output_path), "--max-retry-work-items", "20"]
+    )
+
+    assert build_config(args).max_retry_work_items == 20
+
+
+def test_cli_rejects_removed_max_work_items_option(tmp_path: Path) -> None:
+    input_path = tmp_path / "input.mp4"
+    input_path.write_bytes(b"placeholder")
+    output_path = tmp_path / "output.srt"
+
+    with pytest.raises(SystemExit):
+        build_parser().parse_args([str(input_path), str(output_path), "--max-work-items", "20"])
+
+
+@pytest.mark.parametrize("value", ["0", "-1"])
+def test_validate_rejects_nonpositive_retry_budget(tmp_path: Path, value: str) -> None:
+    input_path = tmp_path / "input.mp4"
+    input_path.write_bytes(b"placeholder")
+    output_path = tmp_path / "output.srt"
+    config = build_config(
+        build_parser().parse_args(
+            [str(input_path), str(output_path), "--max-retry-work-items", value]
+        )
+    )
+
+    with pytest.raises(ValueError, match="max-retry-work-items"):
+        validate_config(config)
 
 
 def test_cli_accepts_english_language(tmp_path: Path) -> None:

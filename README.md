@@ -304,7 +304,7 @@ settings are left to the selected model defaults.
 | `--coverage-gap-merge-sec` | Merge nearby uncovered gaps within this many seconds. Default: `2`. |
 | `--max-retries` | Maximum Gemini retry passes for flagged chunks. Default: `1`. |
 | `--max-split-depth` | Maximum split depth for retry chunks. Default: `2`. |
-| `--max-work-items` | Maximum work items allowed during retry planning. Default: `16`. |
+| `--max-retry-work-items` | Optional limit on additional retry children. Initial chunks do not count; default: unlimited. |
 
 ### Artifacts, Cache, and Logging
 
@@ -317,7 +317,9 @@ settings are left to the selected model defaults.
 
 Important preserved artifact files include `run_config.json`, `run_summary.json`,
 `chunk_manifest.json`, `transcripts.json`, `token_usage.json`, `alignment.json`, `qa_report.json`,
-and `errors.json` when a run fails.
+`retry_trace.json`, and `errors.json` when a run fails. Retry configuration is recorded in
+`run_config.json`; generation-level scheduling decisions and budget skips are recorded in
+`retry_trace.json`; aggregate retry counts are recorded in `run_summary.json`.
 
 ## Troubleshooting
 

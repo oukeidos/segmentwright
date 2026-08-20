@@ -40,6 +40,7 @@ from .resegmentation.quality import (
     fallback_segment_source_text,
 )
 from .retry import (
+    RetrySplitDecision,
     build_retry_children,
     clip_speech_segments_absolute,
     plan_retry_split,
@@ -79,6 +80,35 @@ class SegmentedChunk:
     transcription: GeminiTranscriptionResult
     alignment_lines: list[str]
     segmentation_report: dict[str, Any]
+
+
+@dataclass
+class RetryBudgetState:
+    limit: int | None
+    generated_children: int = 0
+    split_parents: int = 0
+    skipped_parents: int = 0
+
+    def reserve_split(self, child_count: int) -> bool:
+        if self.limit is not None and self.generated_children + child_count > self.limit:
+            self.skipped_parents += 1
+            return False
+        self.generated_children += child_count
+        self.split_parents += 1
+        return True
+
+
+@dataclass(frozen=True)
+class RetrySplitRequest:
+    chunk: PlannedChunk
+    omission: LongOmission
+    decision: RetrySplitDecision
+    children: tuple[PlannedChunk, ...]
+
+
+@dataclass(frozen=True)
+class RetryUnavailable:
+    reason: str
 
 
 def run_pipeline(config: AppConfig) -> None:
@@ -340,13 +370,7 @@ def run_pipeline_with_gemini(config: AppConfig, *, reporter: ConsoleReporter) ->
             "Detected %d long omission candidate(s) after retry processing",
             len(qa_report.long_omissions),
         )
-    write_json(
-        config.artifacts_dir / "retry_trace.json",
-        {
-            "schema": "segmentwright.retry_trace.v1",
-            "events": retry_trace,
-        },
-    )
+    write_retry_trace_artifact(config.artifacts_dir, retry_trace)
     stable_cues = stabilize_cues(cues)
     write_json(
         config.artifacts_dir / "final_assembly.json",
@@ -823,13 +847,7 @@ def write_alignment_and_srt_artifacts(
             "Detected %d long omission candidate(s) after transcript import processing",
             len(qa_report.long_omissions),
         )
-    write_json(
-        config.artifacts_dir / "retry_trace.json",
-        {
-            "schema": "segmentwright.retry_trace.v1",
-            "events": retry_trace,
-        },
-    )
+    write_retry_trace_artifact(config.artifacts_dir, retry_trace)
     stable_cues = stabilize_cues(cues)
     write_json(
         config.artifacts_dir / "final_assembly.json",
@@ -841,6 +859,19 @@ def write_alignment_and_srt_artifacts(
     )
     config.output_path.write_text(format_srt(stable_cues), encoding="utf-8")
     return stable_cues
+
+
+def write_retry_trace_artifact(
+    artifacts_dir: Path,
+    retry_trace: list[dict[str, Any]],
+) -> None:
+    write_json(
+        artifacts_dir / "retry_trace.json",
+        {
+            "schema": "segmentwright.retry_trace.v1",
+            "events": retry_trace,
+        },
+    )
 
 
 def run_vad_stage(
@@ -934,14 +965,9 @@ def process_chunk_generations(
     trace: list[dict[str, Any]] = []
     current_generation = initial_chunks
     generation = 0
-    processed_count = 0
+    budget_state = RetryBudgetState(limit=config.max_retry_work_items)
     ollama_status: OllamaRuntimeStatus | None = None
     while current_generation:
-        processed_count += len(current_generation)
-        if processed_count > config.max_work_items:
-            raise RuntimeError(
-                f"Exceeded --max-work-items ({config.max_work_items}) while processing retries"
-            )
         transcribed = run_transcription_stage(
             config=config,
             generation=generation,
@@ -977,8 +1003,11 @@ def process_chunk_generations(
             source_id=source_id,
             speech_segments=speech_segments,
             processed=aligned,
+            budget_state=budget_state,
+            reporter=reporter,
         )
         trace.extend(generation_trace)
+        write_retry_trace_artifact(config.artifacts_dir, trace)
         accepted.extend(
             item for item in aligned if not was_superseded_by_retry(item, generation_trace)
         )
@@ -1460,22 +1489,26 @@ def plan_retries_for_generation(
     source_id: str,
     speech_segments: list[VadSegment],
     processed: list[ProcessedChunk],
+    budget_state: RetryBudgetState,
+    reporter: ConsoleReporter,
 ) -> tuple[list[PlannedChunk], list[dict[str, Any]]]:
     next_generation: list[PlannedChunk] = []
     trace: list[dict[str, Any]] = []
+    requests: list[RetrySplitRequest] = []
+    requested_parent_count = 0
     for aligned in processed:
         if not aligned.qa_report.has_long_omissions:
             continue
+        requested_parent_count += 1
 
-        decision = maybe_split_for_retry(
+        request = maybe_split_for_retry(
             config=config,
             chunk=aligned.chunk,
-            normalized_wav=normalized_wav,
             speech_segments=speech_segments,
             source_id=source_id,
             omission=aligned.qa_report.long_omissions[0],
         )
-        if decision is None:
+        if isinstance(request, RetryUnavailable):
             trace.append(
                 {
                     "event": "retry_not_available",
@@ -1483,18 +1516,98 @@ def plan_retries_for_generation(
                     "chunk_id": aligned.chunk.chunk_id,
                     "depth": aligned.chunk.depth,
                     "retry_count": aligned.chunk.retry_count,
+                    "reason": request.reason,
                     "long_omissions": [
                         asdict(omission) for omission in aligned.qa_report.long_omissions
                     ],
                 }
             )
             continue
+        requests.append(request)
 
-        children, event = decision
-        event["generation"] = generation
-        event["next_generation"] = generation + 1
-        trace.append(event)
+    requests.sort(
+        key=lambda request: (
+            -request.omission.duration_sec,
+            request.chunk.start_sec,
+            request.chunk.chunk_id,
+        )
+    )
+    split_parent_count = 0
+    skipped_parent_count = 0
+    generated_child_count = 0
+    for request in requests:
+        child_count = len(request.children)
+        if not budget_state.reserve_split(child_count):
+            skipped_parent_count += 1
+            trace.append(
+                {
+                    "event": "retry_skipped_budget",
+                    "generation": generation,
+                    "chunk_id": request.chunk.chunk_id,
+                    "parent_chunk_id": request.chunk.chunk_id,
+                    "depth": request.chunk.depth,
+                    "retry_count": request.chunk.retry_count,
+                    "omission": asdict(request.omission),
+                    "required_retry_items": child_count,
+                    "retry_budget_used": budget_state.generated_children,
+                    "retry_budget_limit": budget_state.limit,
+                }
+            )
+            continue
+
+        children = materialize_retry_children(
+            config=config,
+            normalized_wav=normalized_wav,
+            children=request.children,
+        )
+        split_parent_count += 1
+        generated_child_count += child_count
+        trace.append(
+            {
+                "event": "retry_split",
+                "generation": generation,
+                "next_generation": generation + 1,
+                "parent_chunk_id": request.chunk.chunk_id,
+                "split_time_sec": request.decision.split_time_sec,
+                "split_source": request.decision.split_source,
+                "split_quality": request.decision.split_quality,
+                "omission": asdict(request.omission),
+                "children": [serializable(child) for child in children],
+            }
+        )
         next_generation.extend(children)
+
+    if processed and requested_parent_count > len(processed) / 2:
+        reporter.warning(
+            f"{requested_parent_count} of {len(processed)} chunks in generation {generation} "
+            "requested retry; this may indicate a systemic model, prompt, response-format, "
+            "or alignment problem."
+        )
+    if skipped_parent_count:
+        details = (
+            f" See {config.artifacts_dir / 'retry_trace.json'}."
+            if config.artifacts_explicit
+            else ""
+        )
+        reporter.warning(
+            f"Retry budget selected {split_parent_count} parent(s) and skipped "
+            f"{skipped_parent_count} parent(s) in generation {generation}." + details
+        )
+
+    trace.append(
+        {
+            "event": "generation_summary",
+            "generation": generation,
+            "processed_items": len(processed),
+            "retry_requested_parents": requested_parent_count,
+            "retry_split_parents": split_parent_count,
+            "retry_generated_children": generated_child_count,
+            "retry_skipped_budget_parents": skipped_parent_count,
+            "retry_budget_used": budget_state.generated_children,
+            "retry_budget_limit": budget_state.limit,
+        }
+    )
+    next_generation.sort(key=lambda chunk: (chunk.start_sec, chunk.end_sec, chunk.chunk_id))
     return next_generation, trace
 
 
@@ -1507,86 +1620,6 @@ def was_superseded_by_retry(
         and event.get("parent_chunk_id") == processed.chunk.chunk_id
         for event in retry_trace
     )
-
-
-def process_work_queue(
-    *,
-    config: AppConfig,
-    normalized_wav: Path,
-    initial_chunks: list[PlannedChunk],
-    speech_segments: list[VadSegment],
-    source_id: str,
-    transcriber: GeminiTranscriber,
-    cache: TranscriptCache,
-    aligner: ParakeetAlignerBackend,
-) -> tuple[list[ProcessedChunk], list[dict[str, Any]]]:
-    prompt_spec = resolve_prompt(
-        prompt_preset=config.prompt_preset,
-        language=config.language,
-        prompt_text=config.prompt_text,
-        prompt_file=config.prompt_file,
-    )
-    accepted: list[ProcessedChunk] = []
-    trace: list[dict[str, Any]] = []
-    current_generation = initial_chunks
-    generation = 0
-    processed_count = 0
-    while current_generation:
-        processed_count += len(current_generation)
-        if processed_count > config.max_work_items:
-            raise RuntimeError(
-                f"Exceeded --max-work-items ({config.max_work_items}) while processing retries"
-            )
-        transcribed = [
-            TranscribedChunk(
-                chunk=chunk,
-                transcription=transcribe_one_chunk(
-                    config,
-                    chunk,
-                    source_id,
-                    transcriber,
-                    cache,
-                    prompt_spec=prompt_spec,
-                ),
-            )
-            for chunk in current_generation
-        ]
-        segmented = [
-            SegmentedChunk(
-                chunk=item.chunk,
-                transcription=item.transcription,
-                alignment_lines=item.transcription.transcript.lines,
-                segmentation_report=direct_segmentation_report(
-                    config=config,
-                    chunk=item.chunk,
-                    transcription=item.transcription,
-                ),
-            )
-            for item in transcribed
-        ]
-        aligned = [
-            align_segmented_chunk(
-                config=config,
-                segmented=item,
-                speech_segments=speech_segments,
-                aligner=aligner,
-            )
-            for item in segmented
-        ]
-        current_generation, generation_trace = plan_retries_for_generation(
-            config=config,
-            generation=generation,
-            normalized_wav=normalized_wav,
-            source_id=source_id,
-            speech_segments=speech_segments,
-            processed=aligned,
-        )
-        trace.extend(generation_trace)
-        accepted.extend(
-            item for item in aligned if not was_superseded_by_retry(item, generation_trace)
-        )
-        generation += 1
-    return sorted(accepted, key=lambda item: (item.chunk.start_sec, item.chunk.end_sec)), trace
 
 
 def transcribe_one_chunk(
@@ -2186,13 +2219,14 @@ def maybe_split_for_retry(
     *,
     config: AppConfig,
     chunk: PlannedChunk,
-    normalized_wav: Path,
     speech_segments: list[VadSegment],
     source_id: str,
     omission: LongOmission,
-) -> tuple[list[PlannedChunk], dict[str, Any]] | None:
-    if chunk.retry_count >= config.max_retries or chunk.depth >= config.max_split_depth:
-        return None
+) -> RetrySplitRequest | RetryUnavailable:
+    if chunk.retry_count >= config.max_retries:
+        return RetryUnavailable(reason="max_retries_reached")
+    if chunk.depth >= config.max_split_depth:
+        return RetryUnavailable(reason="max_split_depth_reached")
     decision = plan_retry_split(
         parent=chunk,
         omission=omission,
@@ -2200,13 +2234,27 @@ def maybe_split_for_retry(
         min_split_sec=config.min_retry_split_sec,
     )
     if decision is None:
-        return None
+        return RetryUnavailable(reason="parent_too_short_to_split")
     children = build_retry_children(
         parent=chunk,
         decision=decision,
         source_id=source_id,
         sample_rate=16000,
     )
+    return RetrySplitRequest(
+        chunk=chunk,
+        omission=omission,
+        decision=decision,
+        children=tuple(children),
+    )
+
+
+def materialize_retry_children(
+    *,
+    config: AppConfig,
+    normalized_wav: Path,
+    children: tuple[PlannedChunk, ...],
+) -> list[PlannedChunk]:
     retry_dir = config.artifacts_dir / "retry_chunks"
     materialized_children: list[PlannedChunk] = []
     for child in children:
@@ -2218,16 +2266,7 @@ def maybe_split_for_retry(
             output_path=output_path,
         )
         materialized_children.append(replace(child, audio_path=output_path))
-    event = {
-        "event": "retry_split",
-        "parent_chunk_id": chunk.chunk_id,
-        "split_time_sec": decision.split_time_sec,
-        "split_source": decision.split_source,
-        "split_quality": decision.split_quality,
-        "omission": asdict(omission),
-        "children": [serializable(child) for child in materialized_children],
-    }
-    return materialized_children, event
+    return materialized_children
 
 
 def gemini_call_metadata_path(artifacts_dir: Path, chunk: PlannedChunk) -> Path:
@@ -2320,7 +2359,10 @@ def build_run_config_report(
             "coverage_gap_merge_sec": config.coverage_gap_merge_sec,
             "max_retries": config.max_retries,
             "max_split_depth": config.max_split_depth,
-            "max_work_items": config.max_work_items,
+            "max_retry_work_items": config.max_retry_work_items,
+            "retry_budget_mode": (
+                "unlimited" if config.max_retry_work_items is None else "explicit"
+            ),
         },
         "cache": {
             "enabled": config.cache_enabled,
@@ -2502,6 +2544,80 @@ def resolve_vad_device(device: str) -> str:
     return "cpu"
 
 
+def theoretical_max_retry_item_count(
+    *,
+    initial_chunk_count: int,
+    max_retries: int,
+    max_split_depth: int,
+) -> int:
+    effective_depth = min(max_retries, max_split_depth)
+    return initial_chunk_count * (2 ** (effective_depth + 1) - 2)
+
+
+def load_json_object(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def build_retry_run_summary(config: AppConfig) -> dict[str, Any]:
+    manifest = load_json_object(config.artifacts_dir / "chunk_manifest.json") or {}
+    manifest_chunks = manifest.get("chunks")
+    initial_chunk_count = len(manifest_chunks) if isinstance(manifest_chunks, list) else None
+
+    retry_trace = load_json_object(config.artifacts_dir / "retry_trace.json") or {}
+    raw_events = retry_trace.get("events")
+    events = raw_events if isinstance(raw_events, list) else []
+    generation_summaries = [
+        event
+        for event in events
+        if isinstance(event, dict) and event.get("event") == "generation_summary"
+    ]
+    initial_summary = next(
+        (event for event in generation_summaries if event.get("generation") == 0),
+        None,
+    )
+    if initial_summary is not None and isinstance(initial_summary.get("processed_items"), int):
+        initial_chunk_count = initial_summary["processed_items"]
+
+    processed_retry_item_count = sum(
+        event["processed_items"]
+        for event in generation_summaries
+        if isinstance(event.get("generation"), int)
+        and event["generation"] > 0
+        and isinstance(event.get("processed_items"), int)
+    )
+    retry_split_parent_count = sum(
+        1 for event in events if isinstance(event, dict) and event.get("event") == "retry_split"
+    )
+    retry_skipped_budget_parent_count = sum(
+        1
+        for event in events
+        if isinstance(event, dict) and event.get("event") == "retry_skipped_budget"
+    )
+    if config.transcript_path is not None:
+        theoretical_max = 0
+    elif initial_chunk_count is None:
+        theoretical_max = None
+    else:
+        theoretical_max = theoretical_max_retry_item_count(
+            initial_chunk_count=initial_chunk_count,
+            max_retries=config.max_retries,
+            max_split_depth=config.max_split_depth,
+        )
+    return {
+        "initial_chunk_count": initial_chunk_count,
+        "processed_retry_item_count": processed_retry_item_count,
+        "retry_split_parent_count": retry_split_parent_count,
+        "retry_skipped_budget_parent_count": retry_skipped_budget_parent_count,
+        "retry_budget_limit": config.max_retry_work_items,
+        "retry_budget_exhausted": retry_skipped_budget_parent_count > 0,
+        "theoretical_max_retry_item_count": theoretical_max,
+    }
+
+
 def write_run_summary_artifact(
     *,
     config: AppConfig,
@@ -2530,6 +2646,7 @@ def write_run_summary_artifact(
         "current_stage": reporter.current_stage,
         "stages": [record.to_dict() for record in reporter.stage_records],
     }
+    payload.update(build_retry_run_summary(config))
     if error is not None:
         payload["error"] = {
             "type": type(error).__name__,
