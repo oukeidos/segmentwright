@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+import json
+import struct
+import subprocess
+import sys
+import wave
+from pathlib import Path
+
 from segmentwright.aligners.base import LineSpan
 from segmentwright.aligners.parakeet import (
     CtcTokenSpan,
@@ -87,6 +94,78 @@ class FakeCtcModel:
 
 class FakeDecoderModel:
     decoder = FakePositionalDecoder()
+
+
+def test_torchcodec_decodes_alignment_wav(tmp_path: Path) -> None:
+    audio_path = tmp_path / "audio.wav"
+    pcm_samples = [0, 16_384, -16_384, 32_767] * 200
+    with wave.open(str(audio_path), "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(8_000)
+        wav_file.writeframes(struct.pack(f"<{len(pcm_samples)}h", *pcm_samples))
+
+    script = """
+import json
+import sys
+from pathlib import Path
+from torchcodec.decoders import AudioDecoder
+from segmentwright.aligners.parakeet import decode_audio_for_alignment
+
+waveform = decode_audio_for_alignment(
+    audio_path=Path(sys.argv[1]),
+    sample_rate=16_000,
+    audio_decoder=AudioDecoder,
+)
+print(json.dumps({
+    "dtype": str(waveform.dtype),
+    "sample_count": waveform.numel(),
+    "all_finite": waveform.isfinite().all().item(),
+    "peak": waveform.abs().max().item(),
+}))
+"""
+    completed = subprocess.run(
+        [sys.executable, "-Wd", "-c", script, str(audio_path)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    result = json.loads(completed.stdout)
+
+    assert result["dtype"] == "torch.float32"
+    assert result["sample_count"] == 1_600
+    assert result["all_finite"] is True
+    assert result["peak"] > 0.5
+    assert "DeprecationWarning" not in completed.stderr
+
+
+def test_torchaudio_forced_alignment_runtime_contract() -> None:
+    script = """
+import json
+import torch
+import torchaudio.functional as functional
+
+emissions = torch.tensor([[[4., 1., 0.], [1., 4., 0.], [0., 4., 1.],
+                           [0., 1., 4.], [0., 1., 4.]]]).log_softmax(dim=-1)
+targets = torch.tensor([[1, 2]], dtype=torch.int64)
+aligned_tokens, scores = functional.forced_align(emissions, targets, blank=0)
+spans = functional.merge_tokens(aligned_tokens[0], scores[0], blank=0)
+print(json.dumps({
+    "tokens": aligned_tokens.tolist(),
+    "spans": [[span.token, span.start, span.end] for span in spans],
+}))
+"""
+    completed = subprocess.run(
+        [sys.executable, "-Wd", "-c", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    result = json.loads(completed.stdout)
+
+    assert result["tokens"] == [[0, 1, 1, 2, 2]]
+    assert result["spans"] == [[1, 1, 3], [2, 3, 5]]
+    assert "DeprecationWarning" not in completed.stderr
 
 
 def test_normalize_for_sentencepiece_ctc_removes_subtitle_punctuation() -> None:

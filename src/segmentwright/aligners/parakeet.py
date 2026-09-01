@@ -39,7 +39,7 @@ class ParakeetRuntime:
     decoder: Any
     decoder_name: str
     torch: Any
-    torchaudio: Any
+    audio_decoder: Any
     forced_align: Any
     merge_tokens: Any
     torch_device: Any
@@ -160,8 +160,8 @@ class ParakeetAlignerBackend(AlignerBackend):
         try:
             import nemo.collections.asr as nemo_asr
             import torch
-            import torchaudio
             import torchaudio.functional as functional
+            from torchcodec.decoders import AudioDecoder
         except ImportError as exc:
             raise RuntimeError(
                 "Parakeet alignment dependencies are not installed. "
@@ -183,7 +183,7 @@ class ParakeetAlignerBackend(AlignerBackend):
             decoder=decoder,
             decoder_name=decoder_name,
             torch=torch,
-            torchaudio=torchaudio,
+            audio_decoder=AudioDecoder,
             forced_align=functional.forced_align,
             merge_tokens=functional.merge_tokens,
             torch_device=torch_device,
@@ -199,14 +199,11 @@ class ParakeetAlignerBackend(AlignerBackend):
         target_ids: list[int],
         runtime: ParakeetRuntime,
     ) -> tuple[Any, int, Any, Any, Any]:
-        waveform, sample_rate = runtime.torchaudio.load(str(audio_path))
-        waveform = waveform.mean(dim=0)
-        if sample_rate != self.sample_rate:
-            waveform = runtime.torchaudio.functional.resample(
-                waveform,
-                sample_rate,
-                self.sample_rate,
-            )
+        waveform = decode_audio_for_alignment(
+            audio_path=audio_path,
+            sample_rate=self.sample_rate,
+            audio_decoder=runtime.audio_decoder,
+        )
         waveform = waveform.to(runtime.torch_device)
         input_length = runtime.torch.tensor(
             [waveform.shape[0]],
@@ -237,6 +234,31 @@ class ParakeetAlignerBackend(AlignerBackend):
                 blank=runtime.blank_id,
             )
         return waveform, valid_frames, emissions, aligned_tokens, scores
+
+
+def decode_audio_for_alignment(
+    *,
+    audio_path: Path,
+    sample_rate: int,
+    audio_decoder: Any,
+) -> Any:
+    samples = audio_decoder(str(audio_path), sample_rate=sample_rate).get_all_samples()
+    waveform = samples.data
+    decoded_sample_rate = int(samples.sample_rate)
+    if decoded_sample_rate != sample_rate:
+        raise AlignmentError(
+            "TorchCodec returned an unexpected sample rate: "
+            f"{decoded_sample_rate} != {sample_rate}"
+        )
+    if waveform.ndim != 2 or waveform.shape[0] == 0:
+        raise AlignmentError(
+            "TorchCodec returned an unexpected audio tensor shape: "
+            f"{tuple(waveform.shape)}"
+        )
+    waveform = waveform.mean(dim=0)
+    if waveform.numel() == 0:
+        raise AlignmentError("TorchCodec decoded empty audio")
+    return waveform
 
 
 def resolve_torch_device(device: str, torch: Any) -> str:

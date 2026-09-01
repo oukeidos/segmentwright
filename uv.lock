@@ -2480,9 +2480,9 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8.0" },
-    { name = "torch" },
-    { name = "torchaudio" },
-    { name = "torchcodec" },
+    { name = "torch", specifier = ">=2.10,<3" },
+    { name = "torchaudio", specifier = ">=2.10,<3" },
+    { name = "torchcodec", specifier = ">=0.14,<1" },
 ]
 provides-extras = ["dev"]
 

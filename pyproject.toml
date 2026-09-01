@@ -7,9 +7,9 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "google-genai>=1.0.0",
     "huggingface-hub>=0.23.0",
-    "torch",
-    "torchaudio",
-    "torchcodec",
+    "torch>=2.10,<3",
+    "torchaudio>=2.10,<3",
+    "torchcodec>=0.14,<1",
     "nemo_toolkit[asr]",
     "fireredvad",
     "pydantic>=2.0.0",
