@@ -29,9 +29,8 @@ DEFAULT_FIRE_RED_VAD_MODEL_DIR = Path("~/.cache/segmentwright/FireRedVAD/VAD")
 DEFAULT_PRESET = "quality-baseline"
 DEFAULT_LANGUAGE = "ja"
 SUPPORTED_LANGUAGES = {"ja", "en"}
-DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
-GEMINI_3_FLASH_PREVIEW_MODEL = "gemini-3-flash-preview"
-GEMINI_31_FLASH_LITE_MODEL = "gemini-3.1-flash-lite-preview"
+DEFAULT_GEMINI_MODEL = "gemini-3.7-flash"
+GEMINI_35_FLASH_LITE_MODEL = "gemini-3.5-flash-lite"
 DEFAULT_JAPANESE_ALIGNMENT_MODEL = "nvidia/parakeet-tdt_ctc-0.6b-ja"
 DEFAULT_ENGLISH_ALIGNMENT_MODEL = "nvidia/parakeet-ctc-0.6b"
 DEFAULT_ALIGNMENT_MODELS = {
@@ -66,16 +65,9 @@ PRODUCT_PRESETS: dict[str, ProductPreset] = {
         response_format="json_lines",
         segmentation="direct",
     ),
-    "cheaper-candidate": ProductPreset(
-        name="cheaper-candidate",
-        gemini_model=GEMINI_3_FLASH_PREVIEW_MODEL,
-        prompt_preset=PLAIN_TRANSCRIPT_PROMPT_PRESET,
-        response_format="plain_text",
-        segmentation="resegmentation",
-    ),
     "lite-experimental": ProductPreset(
         name="lite-experimental",
-        gemini_model=GEMINI_31_FLASH_LITE_MODEL,
+        gemini_model=GEMINI_35_FLASH_LITE_MODEL,
         prompt_preset=PLAIN_TRANSCRIPT_PROMPT_PRESET,
         response_format="plain_text",
         segmentation="resegmentation",

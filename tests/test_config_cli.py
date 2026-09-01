@@ -19,7 +19,7 @@ def test_cli_defaults(tmp_path: Path) -> None:
     assert config.env_file == Path("~/.segmentwright/.env").expanduser()
     assert config.preset == "quality-baseline"
     assert config.language == "ja"
-    assert config.gemini_model == "gemini-3.5-flash"
+    assert config.gemini_model == "gemini-3.7-flash"
     assert config.alignment_model is None
     assert config.gemini_thinking_level is None
     assert config.gemini_temperature is None
@@ -170,22 +170,15 @@ def test_alignment_model_defaults_by_language(tmp_path: Path) -> None:
     assert resolve_alignment_model(en_config) == "nvidia/parakeet-ctc-0.6b"
 
 
-def test_cli_cheaper_candidate_preset(tmp_path: Path) -> None:
+def test_cli_rejects_removed_cheaper_candidate_preset(tmp_path: Path) -> None:
     input_path = tmp_path / "input.mp4"
     input_path.write_bytes(b"placeholder")
     output_path = tmp_path / "output.srt"
 
-    args = build_parser().parse_args(
-        [str(input_path), str(output_path), "--preset", "cheaper-candidate"]
-    )
-    config = build_config(args)
-
-    assert config.preset == "cheaper-candidate"
-    assert config.gemini_model == "gemini-3-flash-preview"
-    assert config.prompt_preset == "plain-transcript"
-    assert config.response_format == "plain_text"
-    assert config.segmentation == "resegmentation"
-    assert config.resegmentation_prompt == "medium"
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(
+            [str(input_path), str(output_path), "--preset", "cheaper-candidate"]
+        )
 
 
 def test_cli_lite_experimental_preset(tmp_path: Path) -> None:
@@ -199,7 +192,7 @@ def test_cli_lite_experimental_preset(tmp_path: Path) -> None:
     config = build_config(args)
 
     assert config.preset == "lite-experimental"
-    assert config.gemini_model == "gemini-3.1-flash-lite-preview"
+    assert config.gemini_model == "gemini-3.5-flash-lite"
     assert config.prompt_preset == "plain-transcript"
     assert config.response_format == "plain_text"
     assert config.segmentation == "resegmentation"
@@ -216,7 +209,7 @@ def test_cli_manual_overrides_preserve_unset_values(tmp_path: Path) -> None:
             str(input_path),
             str(output_path),
             "--preset",
-            "cheaper-candidate",
+            "quality-baseline",
             "--gemini-model",
             "custom-model",
             "--prompt-preset",
@@ -236,7 +229,7 @@ def test_cli_manual_overrides_preserve_unset_values(tmp_path: Path) -> None:
     )
     config = build_config(args)
 
-    assert config.preset == "cheaper-candidate"
+    assert config.preset == "quality-baseline"
     assert config.gemini_model == "custom-model"
     assert config.prompt_preset == "subtitle-lines"
     assert config.response_format == "json_lines"

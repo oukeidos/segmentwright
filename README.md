@@ -45,9 +45,8 @@ Product presets:
 
 | Preset | Transcription | Response | Segmentation |
 | --- | --- | --- | --- |
-| `quality-baseline` | `gemini-3.5-flash` | JSON `lines` | direct alignment |
-| `cheaper-candidate` | `gemini-3-flash-preview` | plain text | local resegmentation |
-| `lite-experimental` | `gemini-3.1-flash-lite-preview` | plain text | local resegmentation |
+| `quality-baseline` | `gemini-3.7-flash` | JSON `lines` | direct alignment |
+| `lite-experimental` | `gemini-3.5-flash-lite` | plain text | local resegmentation |
 
 The default preset is `quality-baseline`.
 
@@ -158,17 +157,14 @@ English run:
 uv run segmentwright input.mkv output.srt --language en
 ```
 
-Use the lower-cost Gemini 3 Flash Preview preset:
-
-```bash
-uv run segmentwright input.mkv output.srt --preset cheaper-candidate
-```
-
-Use the Gemini 3.1 Flash Lite experimental preset:
+Use the Gemini 3.5 Flash-Lite experimental preset with local resegmentation:
 
 ```bash
 uv run segmentwright input.mkv output.srt --preset lite-experimental
 ```
+
+Flash-Lite can return Japanese plain transcripts with ASCII spaces between tokens. Segmentwright
+preserves source text and does not normalize those spaces automatically.
 
 Preserve diagnostic artifacts:
 
@@ -235,7 +231,7 @@ only the fields it needs.
 | --- | --- |
 | `INPUT` | Input audio or video file. Supported extensions: `.mp4`, `.mkv`, `.mov`, `.webm`, `.mp3`, `.m4a`, `.wav`. |
 | `OUTPUT` | Output `.srt` path. |
-| `--preset` | Select `quality-baseline`, `cheaper-candidate`, or `lite-experimental`. Default: `quality-baseline`. |
+| `--preset` | Select `quality-baseline` or `lite-experimental`. Default: `quality-baseline`. |
 | `--language` | Source speech language: `ja` or `en`. Default: `ja`, unless `--transcript` provides a language. |
 | `--overwrite` | Replace an existing output file, and allow reuse of a non-empty explicit artifacts directory. |
 | `--verbose` | Show detailed Segmentwright and third-party model logs in the terminal. |
@@ -343,7 +339,7 @@ ollama pull gemma4:12b
 Or let Segmentwright pull it:
 
 ```bash
-uv run segmentwright input.mkv output.srt --preset cheaper-candidate --ollama-auto-pull
+uv run segmentwright input.mkv output.srt --preset lite-experimental --ollama-auto-pull
 ```
 
 ### Local resegmentation runs out of RAM or VRAM
@@ -352,7 +348,7 @@ Use a smaller Ollama model:
 
 ```bash
 uv run segmentwright input.mkv output.srt \
-  --preset cheaper-candidate \
+  --preset lite-experimental \
   --ollama-model gemma3:4b-it-qat
 ```
 
