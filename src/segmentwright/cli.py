@@ -180,6 +180,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--no-resegmentation-preserve-line-breaks",
+        dest="resegmentation_preserve_line_breaks",
+        action="store_false",
+        help=(
+            "Allow local resegmentation to merge across existing line boundaries "
+            "(preserved by default)."
+        ),
+    )
+    parser.add_argument(
         "--resegmentation-max-retries",
         type=int,
         default=3,
@@ -269,6 +278,7 @@ def build_config(args: argparse.Namespace) -> AppConfig:
         resegmentation_ollama_url=args.resegmentation_ollama_url,
         resegmentation_prompt=args.resegmentation_prompt or preset.resegmentation_prompt,
         resegmentation_max_retries=args.resegmentation_max_retries,
+        resegmentation_preserve_line_breaks=args.resegmentation_preserve_line_breaks,
         ollama_auto_pull=args.ollama_auto_pull,
         ollama_start_timeout_sec=args.ollama_start_timeout_sec,
         firered_vad_model_dir=expand_path(args.firered_vad_model_dir),

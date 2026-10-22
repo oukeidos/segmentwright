@@ -101,6 +101,7 @@ class AppConfig:
     resegmentation_ollama_url: str = DEFAULT_RESEGMENTATION_OLLAMA_URL
     resegmentation_prompt: str = DEFAULT_RESEGMENTATION_PROMPT_PRESET
     resegmentation_max_retries: int = 3
+    resegmentation_preserve_line_breaks: bool = True
     ollama_auto_pull: bool = False
     ollama_start_timeout_sec: float = 30.0
     firered_vad_model_dir: Path = DEFAULT_FIRE_RED_VAD_MODEL_DIR

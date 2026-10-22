@@ -181,6 +181,18 @@ def test_cli_rejects_removed_cheaper_candidate_preset(tmp_path: Path) -> None:
         )
 
 
+@pytest.mark.parametrize("disable", [False, True])
+def test_cli_resegmentation_preserves_line_breaks_by_default(tmp_path: Path, disable: bool) -> None:
+    input_path = tmp_path / "input.mp4"
+    input_path.write_bytes(b"placeholder")
+    arguments = [str(input_path), str(tmp_path / "out.srt")]
+    if disable:
+        arguments.append("--no-resegmentation-preserve-line-breaks")
+    config = build_config(build_parser().parse_args(arguments))
+
+    assert config.resegmentation_preserve_line_breaks is not disable
+
+
 def test_cli_lite_experimental_preset(tmp_path: Path) -> None:
     input_path = tmp_path / "input.mp4"
     input_path.write_bytes(b"placeholder")

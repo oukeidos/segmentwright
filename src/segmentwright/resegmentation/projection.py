@@ -81,6 +81,7 @@ def project_suggestion_to_source(
     suggested_lines: list[str],
     *,
     raw_suggestion: dict[str, Any] | None = None,
+    preserve_line_breaks: bool = True,
 ) -> ResegmentationResult:
     cleaned_suggestions = [str(line).strip() for line in suggested_lines if str(line).strip()]
     if not source_text.strip():
@@ -103,6 +104,14 @@ def project_suggestion_to_source(
         suggested_cursor += line_length
         source_boundaries.append(suggested_to_source[suggested_cursor])
     source_boundaries.append(len(source_normalized))
+
+    if preserve_line_breaks:
+        # Original line boundaries are mandatory; the LLM may only add boundaries.
+        source_cursor = 0
+        for source_line in source_text.splitlines(keepends=True):
+            source_cursor += len(non_whitespace_text(source_line))
+            source_boundaries.append(source_cursor)
+        source_boundaries = sorted(set(source_boundaries))
 
     segments: list[ProjectedSegment] = []
     for start_normalized, end_normalized in zip(

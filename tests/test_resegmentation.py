@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 import segmentwright.pipeline as pipeline
 from segmentwright.chunking import PlannedChunk
 from segmentwright.config import AppConfig
@@ -87,6 +89,44 @@ def test_ollama_payload_keeps_temperature_zero_and_disables_thinking_for_gemma3(
 
     assert payload["think"] is False
     assert payload["options"] == {"num_ctx": 4096, "temperature": 0.0}
+
+
+@pytest.mark.parametrize("separator", ["\n", "\r\n", "\r", "\n\n", "\u2028"])
+def test_projection_keeps_original_boundaries_and_additional_splits(separator: str) -> None:
+    source = f"  첫 문장.{separator}둘째 문장. 마지막 문장.  "
+    result = project_suggestion_to_source(source, ["첫 문장. 둘째 문장.", "마지막 문장."])
+
+    assert result.lines == ["첫 문장.", "둘째 문장.", "마지막 문장."]
+    assert [segment.index for segment in result.projected_segments] == [0, 1, 2]
+    assert result.projection_report.projected_matches_source_non_whitespace
+    for segment in result.projected_segments:
+        assert source[segment.source_start:segment.source_end].strip() == segment.text
+
+
+@pytest.mark.parametrize("preserve", [True, False])
+def test_resegment_transcript_respects_line_boundary_setting(
+    tmp_path: Path, monkeypatch: Any, preserve: bool,
+) -> None:
+    source = "첫 문장.\n둘째 문장."
+    transcript = Transcript(lines=source.splitlines(), raw_json=source)
+    config = AppConfig(
+        input_path=tmp_path / "input.mp4",
+        output_path=tmp_path / "out.srt",
+        artifacts_dir=tmp_path / "artifacts",
+        env_file=tmp_path / ".env",
+        segmentation="resegmentation",
+        resegmentation_preserve_line_breaks=preserve,
+    )
+    monkeypatch.setattr(
+        pipeline, "call_ollama_resegmentation",
+        lambda *args, **kwargs: ResegmentationSuggestion(lines=["첫 문장. 둘째 문장."]),
+    )
+    result = pipeline.resegment_transcript_for_chunk(
+        config=config, chunk=planned_chunk("1", 0.0, 30.0), transcript=transcript,
+    )
+
+    assert result.lines == (source.splitlines() if preserve else [source])
+    assert (result.suggestion.raw or {})["quality_gate"]["fallback_used"] is False
 
 
 def test_projection_preserves_original_text_with_clean_suggestion() -> None:

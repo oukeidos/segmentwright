@@ -268,6 +268,7 @@ These flags apply only when `--transcript` is not used.
 | `--resegmentation-model`, `--ollama-model` | Ollama model for local resegmentation. Default: `gemma4:12b`. |
 | `--resegmentation-ollama-url` | Ollama base URL. Default: `http://localhost:11434`. |
 | `--resegmentation-prompt` | Local segmentation prompt: `short`, `medium`, `long`, or `full`. Default: `medium`. |
+| `--no-resegmentation-preserve-line-breaks` | Allow local resegmentation to merge across existing line boundaries. By default, original line boundaries are mandatory and the local LLM can only add splits within them. |
 | `--resegmentation-max-retries` | Maximum local resegmentation retries after a quality-gate failure. Default: `3`. |
 | `--ollama-auto-pull` | Pull the configured Ollama model automatically if it is missing. |
 | `--ollama-start-timeout-sec` | Seconds to wait for an auto-started Ollama server. Default: `30`. |

@@ -2071,6 +2071,7 @@ def prepare_alignment_lines(
         "mode": "resegmentation",
         "artifact_dir": str(artifact_dir),
         "prompt": config.resegmentation_prompt,
+        "preserve_line_breaks": config.resegmentation_preserve_line_breaks,
         "input_line_count": len(transcription.transcript.lines),
         "input_character_count": len(result.source_text),
         "source_text_construction": {
@@ -2108,6 +2109,7 @@ def resegment_transcript_for_chunk(
             source_text,
             suggestion.lines,
             raw_suggestion=suggestion.raw,
+            preserve_line_breaks=config.resegmentation_preserve_line_breaks,
         )
         quality_report = assess_resegmentation_quality(result, config=quality_config)
         attempts.append(
@@ -2169,6 +2171,7 @@ def resegment_transcript_for_chunk(
         source_text,
         fallback_lines,
         raw_suggestion=fallback_raw,
+        preserve_line_breaks=config.resegmentation_preserve_line_breaks,
     )
     return attach_resegmentation_quality_metadata(
         fallback_result,
@@ -2345,6 +2348,7 @@ def build_run_config_report(
             "prompt": config.resegmentation_prompt,
             "max_retries": config.resegmentation_max_retries,
             "ollama_server": "auto",
+            "preserve_line_breaks": config.resegmentation_preserve_line_breaks,
             "ollama_auto_pull": config.ollama_auto_pull,
             "ollama_start_timeout_sec": config.ollama_start_timeout_sec,
             "ollama_status": ollama_status.to_dict() if ollama_status else None,
