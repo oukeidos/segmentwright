@@ -45,7 +45,7 @@ Product presets:
 
 | Preset | Transcription | Response | Segmentation |
 | --- | --- | --- | --- |
-| `quality-baseline` | `gemini-3.7-flash` | JSON `lines` | direct alignment |
+| `quality-baseline` | `gemini-3.8-flash` | JSON `lines` | direct alignment |
 | `lite-experimental` | `gemini-3.5-flash-lite` | plain text | local resegmentation |
 
 The default preset is `quality-baseline`.

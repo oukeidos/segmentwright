@@ -19,7 +19,7 @@ def test_cli_defaults(tmp_path: Path) -> None:
     assert config.env_file == Path("~/.segmentwright/.env").expanduser()
     assert config.preset == "quality-baseline"
     assert config.language == "ja"
-    assert config.gemini_model == "gemini-3.7-flash"
+    assert config.gemini_model == "gemini-3.8-flash"
     assert config.alignment_model is None
     assert config.gemini_thinking_level is None
     assert config.gemini_temperature is None
